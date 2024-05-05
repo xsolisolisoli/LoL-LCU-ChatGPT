@@ -1,0 +1,185 @@
+from lcu_driver import Connector
+from random import randint
+import time
+from os import system, name
+from openai import OpenAI
+import platform
+
+connector = Connector()
+client = OpenAI()
+
+# fired when LCU API is ready to be used
+@connector.ready
+async def connect(connection):
+    i = 0
+    while i < 1:
+        print('LCU API is ready to be used.')
+        inp = input('Script Started, Execute Command Now or type \'?\' for help: ' )
+        if inp == '?':
+            await getCommands()
+        elif inp.lower() == 'bomb':
+            await bombPlayer(connection)
+
+
+# fired when League Client is closed (or disconnected from websocket)
+@connector.close
+async def disconnect(_):
+    print('The client have been closed!')
+
+# starts the connector
+
+async def bombPlayer(connection):
+    headers = {'Content-type': 'application/json'}
+    try:
+        getChat = await connection.request('get', "/lol-chat/v1/conversations")
+        chat = await getChat.json()
+    except KeyError:
+        print("error in get conversation")
+    inp = input('Choose Player to Converse with Chatbot: ')
+    for i in range(len(chat)):
+        if chat[i]['gameName'].lower() == inp.lower():
+            try:
+                lobbyID = chat[i]["id"]
+                request = "/lol-chat/v1/conversations/" + str(lobbyID) + "/messages"
+            except KeyError:
+                print("error in get lobby id")
+            myMessages = [""]
+            currentmsg = greet()
+            myMessages.append(currentmsg)
+            await connection.request('post', request, headers=headers, data={"type":"chat", "body": currentmsg})
+            #Get Last Message
+            lastMessage = chat[i]["lastMessage"]
+            try:
+                lastMessageBody = lastMessage['body']
+            except:
+                print('No previous msg')
+                lastMessageBody = " "
+            while True:
+                getChat = await connection.request('get', "/lol-chat/v1/conversations")
+                chat = await getChat.json()
+                lastMessage2 = chat[i]["lastMessage"]
+                lmb2 = lastMessage2['body']
+                print(lastMessageBody)
+                if lastMessageBody != lmb2 and lmb2 not in myMessages:
+                    lastMessageBody = lmb2
+                    currentmsg = reply(lastMessageBody)
+                    myMessages.append(currentmsg)
+                    await connection.request('post', request, headers=headers, data={"type":"chat", "body": currentmsg})
+                time.sleep(5)
+               
+
+
+# #Main function for the autochat loop
+# async def autoChat(connection):
+#     getLCUName()
+#     greet()
+#     while True:
+#         try:
+#             getChat = await connection.request('get', "/lol-chat/v1/conversations")
+#             chat = await getChat.json()
+#         except KeyError:
+#             print("error in get conversation")
+#         for i in range(len(chat)):
+#             lobbyType = chat[i]['type']
+#             print(lobbyType)
+#             if chat[i]['type'] == "championSelect":
+#                 try:
+#                     lobbyID = chat[i]["id"]
+#                     print('Successfully connected to championSelect Lobby: ' + lobbyID)
+#                 except KeyError:
+#                     print("error in get lobby id")
+#             else:
+#                 try:
+#                     getNew = await connection.request('get', "/lol-chat/v1/conversations/")
+#                     new = await getChat.json()
+#                     newlobbyID = new[i]["id"]
+#                     print(chat) 
+#                     time.sleep(5)
+#                 except:
+#                     print('idk')
+#                 print(chat[i]['type'])
+#         #championSelect = champ select, postGame(?) = postgame, ??? = inGame
+
+
+
+
+def greet():
+    getLCUName()
+    completion = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=[
+    {"role": "system", "content": "You are a league of legends player with an extremely positive and upbeat attitude"},
+    {"role": "user", "content": "Send a positive greeting message to your teammates in chat, limit 200 characters"}
+    ])
+    print('Greeting Selected:')
+    print(completion.choices[0].message.content)
+    return completion.choices[0].message.content
+
+def reply(msg):
+        client = OpenAI()
+        completion = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+        {"role": "system", "content": "You are a league of legends player with an extremely positive and upbeat attitude"},
+        {"role": "user", "content": "Respond to the following chat message: '" +  msg + "', limit 200 characters"}
+        ])
+        print('Responding to: ' + msg )
+        print('with' + completion.choices[0].message.content)
+        return completion.choices[0].message.content
+
+
+
+async def getCommands():
+    print('Valid Commands:')
+    print('?: Help')
+    print('bomb: Starts a chatgpt-integrated chatbot')
+     
+
+
+def getLCUArguments():
+    global auth_token, app_port, region, riotclient_auth_token, riotclient_app_port
+    '''
+    Get region, remoting-auth-token and app-port for LeagueClientUx.
+    '''
+    if not LCUAvailable():
+        sys.exit('No ' + lcu_name + ' found. Login to an account and try again.')
+
+    for p in psutil.process_iter():
+        if p.name() == lcu_name:
+            args = p.cmdline()
+
+            for a in args:
+                if '--region=' in a:
+                    region = a.split('--region=', 1)[1].lower()
+                if '--remoting-auth-token=' in a:
+                    auth_token = a.split('--remoting-auth-token=', 1)[1]
+                if '--app-port' in a:
+                    app_port = a.split('--app-port=', 1)[1]
+                if '--riotclient-auth-token=' in a:
+                    riotclient_auth_token = a.split('--riotclient-auth-token=', 1)[1]
+                if '--riotclient-app-port=' in a:
+                    riotclient_app_port = a.split('--riotclient-app-port=', 1)[1]
+
+                    
+
+
+def LCUAvailable():
+    '''
+    Check whether a client is available.
+    '''
+    return lcu_name in (p.name() for p in psutil.process_iter())
+
+
+def getLCUName():
+    '''
+    Get LeagueClient executable name depending on platform.
+    '''
+    global lcu_name
+    if platform.system() == 'Windows':
+        lcu_name = 'LeagueClientUx.exe'
+    elif platform.system() == 'Darwin':
+        lcu_name = 'LeagueClientUx'
+    elif platform.system() == 'Linux':
+        lcu_name = 'LeagueClientUx'
+
+connector.start()
